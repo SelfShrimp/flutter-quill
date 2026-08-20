@@ -12,6 +12,7 @@ class _FormattedTextViewer extends StatefulWidget {
     required this.readOnly,
     required this.quillText,
     required this.onChange,
+    this.contextMenuItems,
     this.setActiveController,
     super.key,
   });
@@ -20,6 +21,9 @@ class _FormattedTextViewer extends StatefulWidget {
   final String quillText;
   final void Function(String delta) onChange;
   final void Function(QuillController controller)? setActiveController;
+
+  final List<ContextMenuButtonItem> Function(BuildContext context)?
+      contextMenuItems;
 
   static Document documentFromText(String questionText) {
     Document document;
@@ -75,12 +79,25 @@ class _FormattedTextViewerState extends State<_FormattedTextViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final extraItems = widget.contextMenuItems;
+
     return QuillEditor.basic(
       controller: _controller,
       focusNode: _focusNode,
       configurations: QuillEditorConfigurations(
         showCursor: !widget.readOnly,
         enableInteractiveSelection: !widget.readOnly,
+        contextMenuBuilder: extraItems == null
+            ? QuillRawEditorConfigurations.defaultContextMenuBuilder
+            : (context, state) => TextFieldTapRegion(
+                  child: AdaptiveTextSelectionToolbar.buttonItems(
+                    buttonItems: [
+                      ...state.contextMenuButtonItems,
+                      ...extraItems(context),
+                    ],
+                    anchors: state.contextMenuAnchors,
+                  ),
+                ),
       ),
     );
   }
@@ -126,6 +143,31 @@ class TableCellWidget extends StatefulWidget {
 class _TableCellWidgetState extends State<TableCellWidget> {
   final _cellKey = GlobalKey();
   var _editMode = false;
+
+  VoidCallback? _pendingAction;
+
+  List<ContextMenuButtonItem> _tableMenuItems(BuildContext editorContext) {
+    ContextMenuButtonItem item(String label, VoidCallback action) {
+      return ContextMenuButtonItem(
+        label: label,
+        onPressed: () {
+          _pendingAction = action;
+          Navigator.of(editorContext).pop();
+        },
+      );
+    }
+
+    return [
+      if (widget.onAddRowAfter != null)
+        item('Добавить строку ниже', widget.onAddRowAfter!),
+      if (widget.onAddColumnAfter != null)
+        item('Добавить столбец справа', widget.onAddColumnAfter!),
+      if (widget.onRemoveRow != null)
+        item('Удалить строку', widget.onRemoveRow!),
+      if (widget.onRemoveColumn != null)
+        item('Удалить столбец', widget.onRemoveColumn!),
+    ];
+  }
 
   Future<void> _showCellMenu(Offset globalPosition) async {
     final action = await showMenu<_CellAction>(
@@ -234,6 +276,7 @@ class _TableCellWidgetState extends State<TableCellWidget> {
                                 child: _FormattedTextViewer(
                                     readOnly: false,
                                     quillText: widget.cellData,
+                                    contextMenuItems: _tableMenuItems,
                                     setActiveController: (controller) {
                                       WidgetsBinding.instance
                                           .addPostFrameCallback((_) {
@@ -260,6 +303,10 @@ class _TableCellWidgetState extends State<TableCellWidget> {
               });
 
               widget.onEditMode!(false);
+
+              final pending = _pendingAction;
+              _pendingAction = null;
+              pending?.call();
             },
       child: _editMode
           ? const SizedBox.shrink()
